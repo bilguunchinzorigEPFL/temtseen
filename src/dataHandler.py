@@ -11,4 +11,6 @@ def loadX(featureType):
 
 def calcTimeDelta(X):
     diff = -X["TIMESTAMP"].diff(-1)
-    return diff[X["BUS_ID"].diff(-1) == 0]
+    skip = (X["BUS_ID"].diff(-1) == 0) & (X["BUSSTOP_SEQ"].diff(-1) < 0) & (diff < 3600)
+    diff = diff[skip]
+    return diff

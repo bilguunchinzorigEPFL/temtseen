@@ -45,14 +45,23 @@ class FeatureGroup:
 def GetFeatureGroup(featureGroupName):
     if featureGroupName == "Base":
         return Base("Base")
+    if featureGroupName == "Destination":
+        return Destination("Destination")
     raise NotImplementedError
 
 
 def GetAllFeatureGroupNames():
-    return ["Base"]
+    return ["Base", "Destination"]
 
 
 # Feature implementations
 class Base(FeatureGroup):
     def calc(self, X):
-        return X.loc[:, ~X.columns.isin(['TIMESTAMP', 'RECORD_DATE'])]
+        return X[['BUS_ID', 'BUSROUTE_ID', 'BUSSTOP_ID', 'BUSSTOP_SEQ']]
+
+
+class Destination(FeatureGroup):
+    def calc(self, X):
+        d = X[['BUSSTOP_ID', 'BUSSTOP_SEQ']].shift(-1).fillna(method="ffill")
+        d.columns = ['DEST_BUSSTOP_ID', 'DEST_BUSSTOP_SEQ']
+        return d

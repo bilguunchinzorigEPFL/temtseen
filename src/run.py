@@ -1,4 +1,5 @@
 import os
+import resource
 import sys
 import time
 from datetime import datetime
@@ -10,21 +11,31 @@ from deltaRegressors import GetRegressor
 from evaluators import evaluate
 from featureGenerators import GetFeatureGroup, GetAllFeatureGroupNames
 
+
+def memory_limit():
+    rsrc = resource.RLIMIT_DATA
+    soft, hard = resource.getrlimit(rsrc)
+    resource.setrlimit(rsrc, (int(soft*0.8), hard))
+
+memory_limit()
+
 # configs
 runName = "testRun"
 timestamp = str(datetime.now())
 featureGroupNames = GetAllFeatureGroupNames()
 deltaRegressorNames = [
-    'LinearRegression',
-    'RandomForestRegressor',
-    'LinearSVR',
-    'MLPRegressor',
-    'GaussianProcessRegressor',
-    'ElasticNet',
-    'LassoLars'
+    'MeanRegressor',
+    # 'LinearRegression',
+    # 'RandomForestRegressor',
+    # 'LinearSVR',
+    # 'MLPRegressor',
+    # 'GaussianProcessRegressor',
+    # 'ElasticNet',
+    # 'LassoLars'
 ]
+regressorMode = "normal"
 savePath = "../model/" + runName + "/"
-data.dataName = "test"
+data.dataName = "full"
 
 # init
 print(f"Loading Data From: {data.dataName}")
