@@ -1,6 +1,8 @@
 import os
 import pickle as pkl
 
+import pandas as pd
+
 import dataHandler as data
 
 featureSaveDir = "../features/"
@@ -47,11 +49,13 @@ def GetFeatureGroup(featureGroupName):
         return Base("Base")
     if featureGroupName == "Destination":
         return Destination("Destination")
+    if featureGroupName == "Time":
+        return Time("Time")
     raise NotImplementedError
 
 
 def GetAllFeatureGroupNames():
-    return ["Base", "Destination"]
+    return ["Base", "Destination", "Time"]
 
 
 # Feature implementations
@@ -65,3 +69,12 @@ class Destination(FeatureGroup):
         d = X[['BUSSTOP_ID', 'BUSSTOP_SEQ']].shift(-1).fillna(method="ffill")
         d.columns = ['DEST_BUSSTOP_ID', 'DEST_BUSSTOP_SEQ']
         return d
+
+
+class Time(FeatureGroup):
+    def calc(self, X):
+        d = pd.to_datetime(X["TIMESTAMP"].fillna(method="ffill"), unit='s')
+        return pd.DataFrame({
+            "HOUR": d.dt.hour,
+            "DAY": d.dt.weekday
+        })

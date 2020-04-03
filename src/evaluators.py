@@ -1,3 +1,4 @@
+import pickle as pkl
 import sys
 import time
 
@@ -9,7 +10,7 @@ import dataHandler as data
 
 
 def timestampHider(X, availableIndices):
-    endOfJourney = pd.Series([True]*len(X), index=X.index)
+    endOfJourney = pd.Series([True] * len(X), index=X.index)
     endOfJourney[X.index.difference(availableIndices)] = False
     endOfJourney = endOfJourney & endOfJourney.shift(1)
 
@@ -27,14 +28,22 @@ def mae(a, b):
     return np.mean(np.abs(a - b))
 
 
-def timeDeltaError(pred, real):
-    return mae(pred, real)
+def timeStampPredictorFast(tsHidden, predTd):
+    prevVal = None
+    for i, v in tqdm(list(tsHidden.iteritems())):
+        if np.isnan(v):
+            tsHidden[i] = prevVal + predTd[i]
+            prevVal = tsHidden[i]
+        else:
+            prevVal = tsHidden[i]
+    return tsHidden
 
 
 def timeStampPredictor(tsHidden, predTd):
     prevVal = None
     unkIdx = []
     lastKnownIdx = None
+    changes = []
     for i, v in tqdm(list(tsHidden.iteritems())):
         if np.isnan(v):
             tsHidden[i] = prevVal + predTd[i]
@@ -47,62 +56,88 @@ def timeStampPredictor(tsHidden, predTd):
                     realDiff = tsHidden[i] - tsHidden[lastKnownIdx]
                     predDiff = tsHidden[unkIdx[-1]] + predTd[i] - tsHidden[lastKnownIdx]
                     diff = (realDiff - predDiff) / predDiff
-                    if abs(diff) < 1:
-                        for j in unkIdx:
-                            tsHidden[j] += diff * (tsHidden[j] - tsHidden[lastKnownIdx])
-                    else:
-                        print(f"Too big Error {diff}")
+                    for j in unkIdx:
+                        tsHidden[j] += diff * (tsHidden[j] - tsHidden[lastKnownIdx])
             prevVal = tsHidden[i]
             lastKnownIdx = i
             unkIdx = []
     return tsHidden
 
-from multiprocessing import Pool, cpu_count
 
-def applyParallel(dfGrouped, func):
-    with Pool(cpu_count()) as p:
-        ret_list = p.map(func, [group for name, group in dfGrouped])
-    return pd.concat(ret_list)
-
-def supPredictor(data):
-    if len(data) > 1:
-        finalVal = data["realDiff"].iloc[0]
-        if not np.isnan(finalVal):
-            totalPred = data["Pred"].sum()
-            unitErr = (finalVal - totalPred) / totalPred
+def timeStampPredictorConf(tsHidden, predTd, conf):
+    confCumSum = conf.cumsum()
+    prevVal = None
+    unkIdx = []
+    lastKnownIdx = None
+    for i, v in tqdm(list(tsHidden.iteritems())):
+        if np.isnan(v):
+            tsHidden[i] = prevVal + predTd[i]
+            prevVal = tsHidden[i]
+            unkIdx.append(i)
         else:
-            unitErr = 1
-        preds = (data["Pred"].cumsum().shift(1) * (1 + unitErr)).dropna()
-        preds.index = data["index"][1:]
-        return preds
+            if len(unkIdx) > 0:
+                if i in predTd.index:
+                    # Within one movement
+                    z = confCumSum[lastKnownIdx]
+                    diff = (tsHidden[i] - tsHidden[unkIdx[-1]] - predTd[i]) / (confCumSum[i] - z)
+                    for j in unkIdx:
+                        tsHidden[j] += diff * (confCumSum[j] - z)
+            prevVal = tsHidden[i]
+            lastKnownIdx = i
+            unkIdx = []
 
-def timeStampPredictor2(tsHidden, predTd):
-    tmpHidden = pd.DataFrame(tsHidden)
-    tmpHidden["nullGroup"] = (~pd.isnull(tsHidden)).cumsum()
-    tmpHidden["realDiff"] = tmpHidden["TIMESTAMP"].shift(-1).fillna(method="bfill") - tmpHidden["TIMESTAMP"]
-    tmpHidden["Pred"] = predTd
-    tmpHidden = tmpHidden.reset_index()
-
-    finalPreds = tsHidden.copy().fillna(method="ffill")
-
-    with Pool(cpu_count()) as p:
-        ret_list = p.map(supPredictor, [group for name, group in tmpHidden.groupby("nullGroup")])
-    return finalPreds.add(pd.concat([l for l in ret_list if l is not None]), fill_value=0)
+    return tsHidden
 
 
-def timeStampError(predTimeDelta, realTimeDelta, X):
-    ts = X["TIMESTAMP"]
-    tsHidden = timestampHider(X, realTimeDelta.index)
-    tsPredicted = timeStampPredictor(tsHidden, predTimeDelta)
-    return mae(tsPredicted, ts)
+def timeStampPredictorDouble(tsHidden, predSmall, predBig):
+    prevVal = None
+    unkIdx = []
+    lastKnownIdx = None
+    predBigCumSum = predBig.cumsum()
+    for i, v in tqdm(list(tsHidden.iteritems())):
+        if np.isnan(v):
+            tsHidden[i] = prevVal + predSmall[i]
+            prevVal = tsHidden[i]
+            unkIdx.append(i)
+        else:
+            if len(unkIdx) > 0:
+                if i in predSmall.index:
+                    # Within one movement
+                    realDiff = tsHidden[i] - tsHidden[lastKnownIdx]
+                    predDiff = tsHidden[unkIdx[-1]] + predSmall[i] - tsHidden[lastKnownIdx]
+                    if realDiff > 600:
+                        z = predBigCumSum[lastKnownIdx]
+                        diff = (realDiff - predDiff) / (predBigCumSum[i] - z)
+                        for j in unkIdx:
+                            tsHidden[j] += diff * (predBigCumSum[j] - z)
+                    else:
+                        diff = (realDiff - predDiff) / predDiff
+                        for j in unkIdx:
+                            tsHidden[j] += diff * (tsHidden[j] - tsHidden[lastKnownIdx])
+            prevVal = tsHidden[i]
+            lastKnownIdx = i
+            unkIdx = []
+
+    return tsHidden
 
 
 def evaluate(name, model, inputFeatures, realTimeDelta, X):
     sys.stdout.write(f"    Calculating {name} Error: ")
     sys.stdout.flush()
     s = time.time()
-    predictedTimeDeltas = model.predict(inputFeatures)
-    tdError = timeDeltaError(predictedTimeDeltas, realTimeDelta)
-    tsError = timeStampError(predictedTimeDeltas, realTimeDelta, X)
-    print(f"delta {tdError}, stamp {tsError}, time {time.time() - s}")
+    predTimeDeltas = model.predict(inputFeatures)
+    tdError = mae(predTimeDeltas, realTimeDelta)
+    confs = None
+    if model.givesConfidence:
+        confs = model.confidence
+
+    ts = X["TIMESTAMP"]
+    tsHidden = timestampHider(X, realTimeDelta.index)
+    if confs is None:
+        tsPredicted = timeStampPredictorDouble(tsHidden, predTimeDeltas, model.bigPreds)
+    else:
+        tsPredicted = timeStampPredictorConf(tsHidden, predTimeDeltas, confs)
+    tsError = mae(tsPredicted, ts)
+
+    print(f"\tdelta {tdError}, stamp {tsError}, time {time.time() - s}")
     return tdError, tsError

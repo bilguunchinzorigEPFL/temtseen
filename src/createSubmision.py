@@ -5,7 +5,7 @@ import pandas as pd
 
 import dataHandler as data
 from deltaRegressors import GetRegressor
-from evaluators import timeStampPredictor, evaluate
+from evaluators import timeStampPredictor, evaluate, timeStampPredictorFast
 from featureGenerators import GetFeatureGroup, GetAllFeatureGroupNames
 
 
@@ -18,18 +18,18 @@ def memory_limit():
 memory_limit()
 
 # configs
-runName = "submission1"
+runName = "submission RF"
 timestamp = str(datetime.now())
 featureGroupNames = GetAllFeatureGroupNames()
 deltaRegressorName = 'MeanRegressor'
-regressorMode = "normal"
+mode = "normal"
 savePath = "../submission/" + runName + " T " + timestamp
 data.dataName = "submission"
 
 # init
 print(f"Loading Data From: {data.dataName}")
 featureGroups = [GetFeatureGroup(fg) for fg in featureGroupNames]
-model = GetRegressor(deltaRegressorName)
+model = GetRegressor(deltaRegressorName, mode)
 
 testFeatures = pd.concat([fg.getFeatures("test") for fg in featureGroups], axis=1)
 testX = data.loadX('test')
@@ -42,17 +42,19 @@ trainTimeDelta = data.calcTimeDelta(trainX)
 print("Training")
 model.train(trainFeatures, trainTimeDelta)
 
-# trainTdError, trainTsError = evaluate(
-#     "Train " + deltaRegressorName,
-#     model,
-#     trainFeatures,
-#     trainTimeDelta,
-#     trainX
-# )
+trainTdError, trainTsError = evaluate(
+    "Train " + deltaRegressorName,
+    model,
+    trainFeatures,
+    trainTimeDelta,
+    trainX
+)
 
 predTd = model.predict(testFeatures)
 print("Joining")
 y = testX["TIMESTAMP"].copy()
-predTs = timeStampPredictor(y, predTd)
+predTs = pd.DataFrame(timeStampPredictor(y, predTd))
 print("Saving")
+predTs.columns = ["TIMESTAMP"]
+predTs.index.name = "index"
 predTs.to_csv(savePath)

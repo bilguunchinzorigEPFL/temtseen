@@ -2,6 +2,7 @@ import os
 import resource
 import sys
 import time
+import warnings
 from datetime import datetime
 
 import pandas as pd
@@ -11,11 +12,21 @@ from deltaRegressors import GetRegressor
 from evaluators import evaluate
 from featureGenerators import GetFeatureGroup, GetAllFeatureGroupNames
 
+warnings.filterwarnings("ignore")
 
 def memory_limit():
-    rsrc = resource.RLIMIT_DATA
-    soft, hard = resource.getrlimit(rsrc)
-    resource.setrlimit(rsrc, (int(soft*0.8), hard))
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+    resource.setrlimit(resource.RLIMIT_AS, (int(get_memory() * 1024 * 0.9), hard))
+
+def get_memory():
+    with open('/proc/meminfo', 'r') as mem:
+        free_memory = 0
+        for i in mem:
+            sline = i.split()
+            if str(sline[0]) in ('MemFree:', 'Buffers:', 'Cached:'):
+                free_memory += int(sline[1])
+    return free_memory
+
 
 memory_limit()
 
@@ -24,23 +35,25 @@ runName = "testRun"
 timestamp = str(datetime.now())
 featureGroupNames = GetAllFeatureGroupNames()
 deltaRegressorNames = [
-    'MeanRegressor',
+    # 'MeanRegressor',
+    # 'MeanConfRegressor',
+    # 'LassoLars',
+    # 'GaussianProcessRegressor',
     # 'LinearRegression',
-    # 'RandomForestRegressor',
+    'RandomForestRegressor',
+    # 'GradientBoostingRegressor',
     # 'LinearSVR',
     # 'MLPRegressor',
-    # 'GaussianProcessRegressor',
     # 'ElasticNet',
-    # 'LassoLars'
 ]
-regressorMode = "normal"
+regressorMode = "unit"
 savePath = "../model/" + runName + "/"
-data.dataName = "full"
+data.dataName = "testM"
 
 # init
 print(f"Loading Data From: {data.dataName}")
 featureGroups = [GetFeatureGroup(fg) for fg in featureGroupNames]
-deltaRegressors = [GetRegressor(dr) for dr in deltaRegressorNames]
+deltaRegressors = [GetRegressor(dr, regressorMode) for dr in deltaRegressorNames]
 if not os.path.exists(savePath):
     os.mkdir(savePath)
     with open(savePath + "results.csv", "w") as myfile:
@@ -60,6 +73,7 @@ for i, deltaRegressorName in enumerate(deltaRegressorNames):
     sys.stdout.write(f"Training Regressor: {deltaRegressorName} : ")
     sys.stdout.flush()
     s = time.time()
+    #deltaRegressors[i].load(savePath + deltaRegressorName + "T2020-03-26 17:18:13.117775")
     deltaRegressors[i].train(trainFeatures, trainTimeDelta)
     print(f"Time : {time.time() - s}")
 
